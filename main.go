@@ -20,11 +20,9 @@ import (
 func main() {
 	logger := log.
 		Output(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}).
-		With().Caller().
-		Logger().
+		With().Caller().Logger().
 		Level(zerolog.TraceLevel)
 	zerolog.DefaultContextLogger = &logger
-	ctx := logger.WithContext(context.Background())
 
 	pool, err := dockertest.NewPool("")
 	if err != nil {
@@ -56,21 +54,41 @@ func main() {
 	}()
 	time.Sleep(time.Second)
 
+	const count = 2
+	stopC := make(chan struct{})
 	doneC := make(chan struct{})
 
-	go work(doneC)
-	go work(doneC)
+	for i := 0; i < count; i++ {
+		go work(stopC, doneC)
+	}
 
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	signalName := (<-interrupt).String()
-	zerolog.Ctx(ctx).Debug().Str("signal", signalName).Msg("received os signal")
+	logger.Debug().Str("signal", signalName).Msg("received os signal")
 
-	doneC <- struct{}{}
-	doneC <- struct{}{}
+	go func() {
+		for i := 0; i < count; i++ {
+			stopC <- struct{}{}
+		}
+	}()
+	already := 0
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	for {
+		select {
+		case <-doneC:
+			already++
+			if already == count {
+				return
+			}
+		case <-ctx.Done():
+			panic(ctx.Err())
+		}
+	}
 }
 
-func work(doneC chan struct{}) {
+func work(stopC, doneC chan struct{}) {
 	locker, err := rueidislock.NewLocker(rueidislock.LockerOption{
 		ClientOption:   rueidis.ClientOption{InitAddress: []string{"127.0.0.1:6379"}},
 		KeyMajority:    2,
@@ -99,7 +117,8 @@ func work(doneC chan struct{}) {
 				panic(err)
 			}
 			timer.Reset(time.Second)
-		case <-doneC:
+		case <-stopC:
+			doneC <- struct{}{}
 			return
 		}
 	}
@@ -120,7 +139,7 @@ func tick(locker rueidislock.Locker, id int64) error {
 	}()
 	logger.Debug().Msg("successfully acquired")
 
-	time.Sleep(time.Second * 2)
+	time.Sleep(time.Second * 10)
 
 	return nil
 }

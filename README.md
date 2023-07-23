@@ -1,1 +1,5 @@
 # Lock Ex
+
+```
+go run .
+```

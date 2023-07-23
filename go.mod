@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	github.com/ory/dockertest/v3 v3.10.0
-	github.com/redis/rueidis v1.0.11
+	github.com/redis/rueidis v1.0.13
 	github.com/rs/zerolog v1.29.1
 )
 
